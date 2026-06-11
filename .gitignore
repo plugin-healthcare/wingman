@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Generated agent framework configs (produced by `just sync-mcp`)
+.vscode/mcp.json
+.cursor/mcp.json
+.goose/config.yaml
+opencode.json

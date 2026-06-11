@@ -1,0 +1,11 @@
+version: 1.0.0
+title: ci-check
+description: Run lint, type-check, and tests — mirrors what CI does.
+prompt: |
+  Run the full local CI check in this order. Stop and report immediately if any step fails.
+
+  1. `uv run ruff check` — lint
+  2. `uv run ruff format --check` — formatting
+  3. `uv run pytest --tb=short` — tests
+
+  After all steps, give a summary: which passed, which failed, and what needs fixing.
