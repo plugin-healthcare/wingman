@@ -1,11 +1,12 @@
 [project]
 name = "wingman"
 version = "0.1.0"
-description = "Agent superpowers for any project — stack-aware setup for Copilot, Claude Code, Cursor, Goose, and opencode."
+description = "A GitHub Copilot guardrail toolkit: install instructions, MCP config, and skills, and run a check gate."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "typer>=0.12",
+    "questionary>=2.0",
 ]
 
 [project.scripts]
@@ -17,6 +18,12 @@ package = true
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.15.19",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/wingman"]

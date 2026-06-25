@@ -1,0 +1,14 @@
+# Default check gate for Python projects (`wingman check`).
+# Override per-repo by creating `.wingman/checks.toml` with the same schema.
+
+[[check]]
+name = "lint"
+cmd = "uv run ruff check"
+
+[[check]]
+name = "format"
+cmd = "uv run ruff format --check"
+
+[[check]]
+name = "test"
+cmd = "uv run pytest --tb=short"
