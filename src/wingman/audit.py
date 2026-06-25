@@ -26,9 +26,64 @@ _TRIGGER_HINTS = (
     "use when",
     "use for",
     "use this",
+    "use before",
+    "use to",
     "gebruik bij",
     "gebruik voor",
     "when ",
+)
+# Action verbs that signal an imperative description (says what the skill does,
+# which implicitly tells the agent when to reach for it). Matched on the first
+# word, so "Run SQL queries…" or "Convert between formats…" count as a trigger.
+_IMPERATIVE_VERBS = frozenset(
+    {
+        "run",
+        "read",
+        "write",
+        "create",
+        "edit",
+        "build",
+        "install",
+        "convert",
+        "attach",
+        "explore",
+        "query",
+        "look",
+        "find",
+        "fetch",
+        "generate",
+        "review",
+        "refactor",
+        "debug",
+        "test",
+        "analyze",
+        "analyse",
+        "validate",
+        "check",
+        "search",
+        "load",
+        "export",
+        "import",
+        "deploy",
+        "scaffold",
+        "set",
+        "configure",
+        "manage",
+        "add",
+        "remove",
+        "update",
+        "render",
+        "parse",
+        "format",
+        "compute",
+        "calculate",
+        "preview",
+        "inspect",
+        "list",
+        "show",
+        "get",
+        "lint",
+    }
 )
 
 
@@ -122,7 +177,10 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
 
 def _has_trigger(description: str) -> bool:
     low = description.lower()
-    return any(hint in low for hint in _TRIGGER_HINTS)
+    if any(hint in low for hint in _TRIGGER_HINTS):
+        return True
+    first = re.sub(r"[^a-z]", "", low.split()[0]) if low.split() else ""
+    return first in _IMPERATIVE_VERBS
 
 
 # ── Rules per artifact type ───────────────────────────────────────────────────

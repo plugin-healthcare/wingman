@@ -97,6 +97,43 @@ def test_audit_bad_skill_flags_name_and_description(repo):
     assert "description" in messages
 
 
+def test_audit_imperative_description_is_clean(repo):
+    path = _write_skill(
+        repo,
+        "convert-file",
+        "---\n"
+        "name: convert-file\n"
+        "description: >\n"
+        "  Convert between CSV, JSON, Parquet, and other tabular formats.\n"
+        "---\n\n"
+        "# Convert\n\n" + ("usable instruction content. " * 10) + "\n",
+    )
+    findings = audit.audit_skill(path)
+    assert all("when" not in f.message for f in findings)
+    assert findings == []
+
+
+def test_has_trigger_accepts_imperative_and_phrases():
+    assert audit._has_trigger("Run SQL queries against DuckDB.")
+    assert audit._has_trigger("ALWAYS use before data pipeline tasks.")
+    assert audit._has_trigger("Use when writing modern Python.")
+    assert not audit._has_trigger("A grab bag of miscellaneous helpers.")
+
+
+def test_audit_non_trigger_description_warns(repo):
+    path = _write_skill(
+        repo,
+        "demo",
+        "---\n"
+        "name: demo\n"
+        'description: "A grab bag of miscellaneous helpers for the repo."\n'
+        "---\n\n"
+        "# Demo\n\n" + ("usable instruction content. " * 10) + "\n",
+    )
+    findings = audit.audit_skill(path)
+    assert any("when" in f.message for f in findings)
+
+
 def test_audit_all_discovers_and_returns_findings(repo):
     _write_skill(repo, "demo", "---\nname: wrong\n---\n\nx\n")
     findings = audit.audit_all()
