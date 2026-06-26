@@ -1,0 +1,69 @@
+[skills.attach-db]
+repo = "https://github.com/duckdb/duckdb-skills"
+path = "skills/attach-db"
+ref = "main"
+
+[skills.convert-file]
+repo = "https://github.com/duckdb/duckdb-skills"
+path = "skills/convert-file"
+ref = "main"
+
+[skills.dagster-expert]
+repo = "https://github.com/dagster-io/skills"
+path = "skills/dagster-expert/skills/dagster-expert"
+ref = "master"
+
+[skills.developing-with-streamlit]
+repo = "https://github.com/streamlit/agent-skills"
+path = "developing-with-streamlit"
+ref = "main"
+
+[skills.dignified-python]
+repo = "https://github.com/dagster-io/skills"
+path = "skills/dignified-python/skills/dignified-python"
+ref = "master"
+
+[skills.duckdb-docs]
+repo = "https://github.com/duckdb/duckdb-skills"
+path = "skills/duckdb-docs"
+ref = "main"
+
+[skills.install-duckdb]
+repo = "https://github.com/duckdb/duckdb-skills"
+path = "skills/install-duckdb"
+ref = "main"
+
+[skills.mcp-builder]
+repo = "https://github.com/anthropics/skills"
+path = "skills/mcp-builder"
+ref = "main"
+
+[skills.query]
+repo = "https://github.com/duckdb/duckdb-skills"
+path = "skills/query"
+ref = "main"
+
+[skills.read-file]
+repo = "https://github.com/duckdb/duckdb-skills"
+path = "skills/read-file"
+ref = "main"
+
+[skills.s3-explore]
+repo = "https://github.com/duckdb/duckdb-skills"
+path = "skills/s3-explore"
+ref = "main"
+
+[skills.skill-creator]
+repo = "https://github.com/anthropics/skills"
+path = "skills/skill-creator"
+ref = "main"
+
+[skills.spatial]
+repo = "https://github.com/duckdb/duckdb-skills"
+path = "skills/spatial"
+ref = "main"
+
+[skills.webapp-testing]
+repo = "https://github.com/anthropics/skills"
+path = "skills/webapp-testing"
+ref = "main"

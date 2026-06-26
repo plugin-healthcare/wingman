@@ -14,7 +14,9 @@ from pathlib import Path
 
 # Outputs (relative to the repo being set up)
 COPILOT_INSTRUCTIONS = Path(".github") / "copilot-instructions.md"
-VSCODE_MCP = Path(".vscode") / "mcp.json"
+# Root .mcp.json (the editor-agnostic location the Copilot CLI reads). Uses the
+# `mcpServers` schema key. Not VS Code's `.vscode/mcp.json`.
+MCP_CONFIG = Path(".mcp.json")
 
 
 def data_path() -> Path:
@@ -45,11 +47,11 @@ def available_stacks() -> list[str]:
 
 
 def _load_servers(path: Path) -> dict:
-    """Read an MCP server map, accepting both VS Code and legacy schemas."""
+    """Read an MCP server map, accepting both the CLI and VS Code schema keys."""
     if not path.exists():
         return {}
     raw = json.loads(path.read_text())
-    return raw.get("servers") or raw.get("mcpServers") or {}
+    return raw.get("mcpServers") or raw.get("servers") or {}
 
 
 def merged_servers(stack: str | None) -> dict:
@@ -96,5 +98,23 @@ def write_instructions(stack: str | None, dry_run: bool) -> str:
 
 
 def write_mcp(stack: str | None, dry_run: bool) -> str:
-    content = json.dumps({"servers": merged_servers(stack)}, indent=2) + "\n"
-    return _write(VSCODE_MCP, content, dry_run)
+    content = json.dumps({"mcpServers": merged_servers(stack)}, indent=2) + "\n"
+    return _write(MCP_CONFIG, content, dry_run)
+
+
+def read_mcp_servers() -> dict:
+    """Current servers in the repo's .mcp.json (base + local if absent)."""
+    path = repo_root() / MCP_CONFIG
+    if not path.exists():
+        return dict(merged_servers(None))
+    return _load_servers(path)
+
+
+def add_mcp_server(name: str, config: dict, dry_run: bool = False) -> str:
+    """Merge one MCP server into .mcp.json, keeping existing servers."""
+    if dry_run:
+        return f"  [dry-run] mcp {name}"
+    servers = read_mcp_servers()
+    servers[name] = config
+    content = json.dumps({"mcpServers": servers}, indent=2) + "\n"
+    return _write(MCP_CONFIG, content, dry_run)

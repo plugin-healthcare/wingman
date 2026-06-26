@@ -31,6 +31,9 @@ packages = ["src/wingman"]
 [tool.ruff]
 line-length = 88
 target-version = "py312"
+# Vendored skill scripts (installed by `wingman skill add`) are third-party
+# code, not ours to lint or format.
+extend-exclude = [".github/skills"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

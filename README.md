@@ -18,7 +18,7 @@ There is a clean split between the two halves of the workflow:
   CLI for an optional content review).
 - **GitHub Copilot does the runtime work.** Copilot reads the files Wingman writes
   (`.github/copilot-instructions.md`, `.github/skills/`, `.github/agents/`,
-  `.github/prompts/`, `.vscode/mcp.json`) while you code. Wingman never replaces
+  `.github/prompts/`, `.mcp.json`) while you code. Wingman never replaces
   Copilot; it just gets the guardrails in place and keeps them healthy.
 
 In short: **Wingman installs and maintains the guardrails, Copilot uses them.**
@@ -43,7 +43,7 @@ Every command operates on the current working directory (the repo you are in).
 ## Quick start
 
 ```bash
-wingman init            # write copilot-instructions.md + .vscode/mcp.json, then pick artifacts
+wingman init            # write copilot-instructions.md + .mcp.json, then pick artifacts
 wingman list            # show the Copilot triggers active in this repo
 wingman check           # run the lint/format/test gate
 wingman audit           # lint your skills/agents/instructions for best practices
@@ -53,11 +53,12 @@ wingman audit           # lint your skills/agents/instructions for best practice
 
 | Command | What it does |
 | --- | --- |
-| `wingman init [stack]` | Write `.github/copilot-instructions.md` and `.vscode/mcp.json`, then open a menu to pick skills/agents/prompts/instructions. Stack defaults to `python`. |
+| `wingman init [stack]` | Write `.github/copilot-instructions.md` and `.mcp.json`, then open a menu to pick skill themes, agents, prompts, instructions, and MCP servers. Stack defaults to `python`. |
 | `wingman add` | Re-open the catalog menu to install more artifacts. |
+| `wingman sync [--all] [--no-docs]` | Discover skills bundled in installed packages and copy them in; for packages with a known skill theme, fetch those; for the rest, probe PyPI for an `llms.txt` and wire it into the `docs` MCP server. |
 | `wingman list` | Show what Copilot will pick up: always-on instructions, scoped instructions, slash-command prompts, agents, and skills. |
-| `wingman skill add <name\|set\|git-url>` | Fetch a skill into `.github/skills/<name>/`. Use a curated short name, a **set** name (e.g. `duckdb`) to install a whole bundle, or a git URL with `--path` (and optional `--ref`). |
-| `wingman skill list` | List installed skills. Add `--all` to see every indexed skill marked installed (✓) vs available (—). |
+| `wingman skill add <theme\|git-url>` | Fetch skills into `.github/skills/<name>/`. Use a **theme** name (e.g. `duckdb`) to install all its skills, or a git URL with `--path` (and optional `--ref`) for a one-off. |
+| `wingman skill list` | List installed skills. Add `--all` to also show available themes. |
 | `wingman skill update [name]` | Re-fetch one or all skills to their latest commit. |
 | `wingman skill remove <name>` | Delete a skill from disk and the manifest. |
 | `wingman agent list` | List bundled agents and whether each is installed in this repo. |
@@ -75,41 +76,51 @@ wingman audit           # lint your skills/agents/instructions for best practice
   skills/<name>/SKILL.md           # fetched skills (+ references/, assets/)
   agents/<name>.agent.md           # custom agents
   prompts/<name>.prompt.md         # slash-command prompts
-.vscode/
-  mcp.json                         # MCP servers (VS Code "servers" schema)
+.mcp.json                          # MCP servers (Copilot CLI "mcpServers" schema)
 .wingman/
   skills.toml                      # skill manifest (source of truth)
   skills.lock                      # pinned commits
   checks.toml                      # optional: override the check gate
   instructions.local.md            # optional: appended to copilot-instructions.md
-  mcp.local.json                   # optional: merged into .vscode/mcp.json
+  mcp.local.json                   # optional: merged into .mcp.json
 ```
 
 ## MCP setup
 
-Wingman writes `.vscode/mcp.json` using the VS Code schema (a top-level `servers`
-object). That file configures MCP servers for Copilot in VS Code. The Python stack
-ships these official servers by default:
+Wingman writes the repo-root `.mcp.json` (the editor-agnostic location the
+**GitHub Copilot CLI** reads, using a top-level `mcpServers` object). MCP servers
+are **opt-in**: `wingman init` / `wingman add` show a picker so you choose which to
+wire in (a couple are pre-checked as sensible defaults). Selecting a server merges
+it into `.mcp.json`, keeping any servers already there. Available servers:
 
-| Server | Transport | Auth | What it gives Copilot |
+| Server | Transport | Default | What it gives Copilot |
 | --- | --- | --- | --- |
-| `polars` | http (`mcp.pola.rs`) | none | Polars API and docs knowledge |
-| `git` | stdio (`uvx mcp-server-git`) | none | Git operations on the workspace |
-| `github` | http (`api.githubcopilot.com`) | VS Code GitHub sign-in | Issues, PRs, repos, code search |
-| `docs` | stdio (`uvx mcpdoc`) | none | Library docs from `llms.txt` (Pydantic by default) |
+| `github` | http (`api.githubcopilot.com`) | ✓ | Issues, PRs, repos, code search |
+| `git` | stdio (`uvx mcp-server-git`) | ✓ | Git operations on the current repo |
+| `polars` | http (`mcp.pola.rs`) | — | Polars API and docs knowledge |
+| `likec4` | stdio (`npx @likec4/mcp`) | — | Query your LikeC4 architecture model |
 
-The `docs` server uses [`langchain-ai/mcpdoc`](https://github.com/langchain-ai/mcpdoc)
-to serve any project's `llms.txt` over MCP. Pydantic ships no official skill or
-server, so it is wired in here. Add more sources by appending `Name:URL` pairs to
-the `--urls` argument in `.vscode/mcp.json` (for example
-`Pydantic:https://docs.pydantic.dev/latest/llms.txt FastAPI:https://fastapi.tiangolo.com/llms.txt`).
+Enabling a non-default `[remote]` server (e.g. `polars`) prints a warning that its
+request payload, which the model composes and may pack with your data, goes to a
+third party. See [`docs/mcp.md`](docs/mcp.md) for the full privacy breakdown.
 
-Add repo-local servers in `.wingman/mcp.local.json`; Wingman merges them in. Optional
-servers that need a token (so they are not defaults) include
-[`pydantic/logfire-mcp`](https://github.com/pydantic/logfire-mcp) and
-[`motherduckdb/mcp-server-motherduck`](https://github.com/motherduckdb/mcp-server-motherduck)
-for MotherDuck. The defaults need only `uv` (for the `git` server); the `http`
-servers need no local runtime, and nothing here requires `npx`/Node.
+> **Using VS Code?** VS Code's Copilot does **not** read the root `.mcp.json` — it
+> only reads `.vscode/mcp.json`, which uses a different top-level key (`servers`
+> instead of `mcpServers`). To use these servers inside the VS Code editor, copy the
+> server entries into `.vscode/mcp.json` under a `servers` key, or run **MCP: Add
+> Server** from the Command Palette and choose **Workspace**. The Copilot CLI and the
+> Copilot coding agent do not need this; only the VS Code editor does.
+
+stdio servers operate on their **launch directory** (the repo), so they work outside
+VS Code too. Wingman deliberately avoids the VS Code-only `${workspaceFolder}`
+variable: `mcp-server-git` and `@likec4/mcp` both default to the current directory,
+which the MCP host sets to your repo root.
+
+Add repo-local servers in `.wingman/mcp.local.json`; Wingman merges them in. The
+`docs` server (`uvx mcpdoc`) is wired in on demand by `wingman sync --docs`, which
+probes packages for an `llms.txt` and serves it over MCP. Other optional servers that
+need a token include [`pydantic/logfire-mcp`](https://github.com/pydantic/logfire-mcp)
+and [`motherduckdb/mcp-server-motherduck`](https://github.com/motherduckdb/mcp-server-motherduck).
 
 Note: the **Copilot coding agent** (the cloud agent) reads its MCP configuration
 from your repository's Copilot settings on GitHub, not from a committed file.
@@ -117,20 +128,26 @@ Wingman cannot write that for you; configure it in the repo settings UI.
 
 ## Skills
 
-`wingman skill add <name>` resolves a short name from a curated index of official
-skills, or takes a git URL with `--path`. See everything on offer with
-`wingman skill list --all` (✓ installed, — available). The index currently ships:
+Skills are grouped into **themes** in the `wingman init` / `wingman add` picker:
+pick a theme and all of its skills install at once. List them with
+`wingman skill list --all`, or install one directly with `wingman skill add <theme>`.
+The index currently ships:
 
-- **DuckDB** (from [`duckdb/duckdb-skills`](https://github.com/duckdb/duckdb-skills)):
-  `query`, `read-file`, `install-duckdb`, `duckdb-docs`, `attach-db`,
-  `convert-file`, `s3-explore`, `spatial`. Set: `duckdb`.
-- **Streamlit** (from [`streamlit/agent-skills`](https://github.com/streamlit/agent-skills)):
-  `developing-with-streamlit`. Set: `streamlit`.
-- **Dagster** (from [`dagster-io/skills`](https://github.com/dagster-io/skills)):
+- **duckdb** (from [`duckdb/duckdb-skills`](https://github.com/duckdb/duckdb-skills)):
+  every official DuckDB skill (`query`, `read-file`, `attach-db`, `convert-file`,
+  `s3-explore`, `spatial`, …).
+- **streamlit** (from [`streamlit/agent-skills`](https://github.com/streamlit/agent-skills)):
+  building, styling, and deploying Streamlit apps.
+- **dagster** (from [`dagster-io/skills`](https://github.com/dagster-io/skills)):
   `dagster-expert` (Dagster + `dg` CLI guidance) and `dignified-python`
   (opinionated production Python standards).
-- **General engineering** (from [`anthropics/skills`](https://github.com/anthropics/skills)):
-  `skill-creator`, `mcp-builder`, `webapp-testing`.
+- **agent-tooling** (from [`anthropics/skills`](https://github.com/anthropics/skills)):
+  `skill-creator` and `mcp-builder`.
+- **developing** (from [`anthropics/skills`](https://github.com/anthropics/skills)):
+  `webapp-testing` (Playwright-driven web app testing).
+- **likec4** (from [`likec4/likec4`](https://github.com/likec4/likec4)):
+  `likec4-dsl` reference for `.c4`/`.likec4` files.
+
 
 ```bash
 wingman skill add query           # one skill, from the index
@@ -191,3 +208,10 @@ uv run pytest
 uv run ruff check
 uv run ruff format
 ```
+
+## Credits
+
+Projects we borrowed ideas from or built on top of:
+
+- **[library-skills](https://github.com/tiangolo/library-skills)** by tiangolo: the convention of shipping `SKILL.md` files inside Python packages under `.agents/skills/`. `wingman sync` scans installed packages using that standard and brings discovered skills into `.github/skills/` for Copilot.
+- **[ponytail](https://github.com/DietrichGebert/ponytail)** by DietrichGebert: a "write only what the task needs" ruleset for AI agents. Informed the thinking behind Wingman's default instructions and check gate philosophy.

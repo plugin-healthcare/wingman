@@ -41,7 +41,7 @@ def skill_source(tmp_path) -> tuple[str, str]:
     (skill / "references").mkdir()
     (skill / "references" / "note.md").write_text("reference material\n")
 
-    _git(["init"], src)
+    _git(["init", "-b", "master"], src)
     _git(["config", "user.email", "t@example.com"], src)
     _git(["config", "user.name", "test"], src)
     _git(["add", "-A"], src)
@@ -62,7 +62,7 @@ def skill_set_source(tmp_path) -> tuple[str, str]:
             f"---\n\n# {member}\n\nEnough body content to be a usable skill here.\n"
         )
 
-    _git(["init"], src)
+    _git(["init", "-b", "master"], src)
     _git(["config", "user.email", "t@example.com"], src)
     _git(["config", "user.name", "test"], src)
     _git(["add", "-A"], src)

@@ -101,6 +101,31 @@ def test_add_set_respects_exclude(repo, skill_set_source, monkeypatch):
     assert not (repo / skills.SKILLS_DIR / "gamma").exists()
 
 
+def test_add_set_explicit_members(repo, skill_set_source, monkeypatch):
+    # Skills live at unrelated subpaths; an explicit member list picks them out.
+    url, ref = skill_set_source
+    monkeypatch.setattr(
+        skills,
+        "resolve_set",
+        lambda name: skills.SkillSet(
+            name="demo-set",
+            repo=url,
+            ref=ref,
+            members=[
+                skills.SkillSetMember(name="alpha", path="skills/alpha"),
+                skills.SkillSetMember(name="gamma", path="skills/gamma"),
+            ],
+        ),
+    )
+    installed = skills.add_set("demo-set")
+    assert sorted(s.name for s, _ in installed) == ["alpha", "gamma"]
+    assert not (repo / skills.SKILLS_DIR / "beta").exists()
+    manifest = skills.read_manifest()
+    assert manifest["gamma"].path == "skills/gamma"
+    # recorded path resolves for update/remove
+    assert skills.update("alpha")[0][0] == "alpha"
+
+
 def test_add_set_root_path_normalizes(repo, skill_source, monkeypatch):
     # skill_source repo holds 'demo/SKILL.md' at its root, so path="." finds it.
     url, ref = skill_source

@@ -1,7 +1,7 @@
 # ADR-{number}: {title}
 
 Date: {date}  
-Status: Proposed | Accepted | Deprecated | Superseded by ADR-{number}
+Status: Proposed | Accepted | Deprecated | Superseded by ADR-XXXX
 
 ## Context
 <!-- What is the situation that requires a decision? What forces are at play? -->

@@ -13,11 +13,12 @@ Sources:
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import tempfile
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from wingman.core import data_path, repo_root
@@ -37,19 +38,36 @@ class SkillSource:
     repo: str
     path: str
     ref: str | None = None
+    packages: list[str] = field(default_factory=list)
+
+
+@dataclass
+class SkillSetMember:
+    """One skill in a set, at an explicit subpath inside the repo."""
+
+    name: str
+    path: str
 
 
 @dataclass
 class SkillSet:
-    """A named bundle of skills living under one directory in a git repo."""
+    """A named theme: a bundle of skills fetched from one git repo.
+
+    Members are resolved either by globbing ``*/SKILL.md`` under ``path`` (with
+    optional ``include``/``exclude``), or, when ``members`` is given, from the
+    explicit subpaths listed there (for repos where skills live at unrelated
+    locations).
+    """
 
     name: str
     repo: str
-    path: str
+    path: str = ""
     ref: str | None = None
     include: list[str] | None = None
     exclude: list[str] | None = None
+    members: list[SkillSetMember] | None = None
     description: str = ""
+    packages: list[str] = field(default_factory=list)
 
 
 # ── Manifest + lock ───────────────────────────────────────────────────────────
@@ -122,7 +140,11 @@ def resolve_index(name: str) -> SkillSource | None:
     if not entry:
         return None
     return SkillSource(
-        name=name, repo=entry["repo"], path=entry["path"], ref=entry.get("ref")
+        name=name,
+        repo=entry["repo"],
+        path=entry["path"],
+        ref=entry.get("ref"),
+        packages=entry.get("packages", []),
     )
 
 
@@ -136,14 +158,59 @@ def read_sets_index() -> dict[str, SkillSet]:
         name: SkillSet(
             name=name,
             repo=entry["repo"],
-            path=entry["path"],
+            path=entry.get("path", ""),
             ref=entry.get("ref"),
             include=entry.get("include"),
             exclude=entry.get("exclude"),
+            members=[
+                SkillSetMember(name=m["name"], path=m["path"]) for m in entry["members"]
+            ]
+            if entry.get("members")
+            else None,
             description=entry.get("description", ""),
+            packages=entry.get("packages", []),
         )
         for name, entry in sets.items()
     }
+
+
+def _normalize(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def indexed_for_packages(installed: set[str]) -> list[str]:
+    """Return set/skill names from the index whose packages overlap with installed.
+
+    Skips entries that are already installed on disk.
+    Returns set names first (preferred over individual skills for the same package),
+    then individual skill names not already covered by a matched set.
+    """
+    normalized = {_normalize(p) for p in installed}
+    manifest = read_manifest()
+
+    matched_sets: list[str] = []
+    covered_packages: set[str] = set()
+    for set_name, sset in read_sets_index().items():
+        if any(_normalize(p) in normalized for p in sset.packages):
+            covered_packages.update(_normalize(p) for p in sset.packages)
+            # Skip if all members already installed
+            if set_name not in manifest:
+                matched_sets.append(set_name)
+
+    matched_skills: list[str] = []
+    index_file = data_path() / "skills" / "index.toml"
+    if index_file.exists():
+        skills_raw = tomllib.loads(index_file.read_text()).get("skills", {})
+        for skill_name, entry in skills_raw.items():
+            pkgs = entry.get("packages", [])
+            if not any(_normalize(p) in normalized for p in pkgs):
+                continue
+            if any(_normalize(p) in covered_packages for p in pkgs):
+                continue  # already handled by a matched set
+            if skill_name not in manifest:
+                matched_skills.append(skill_name)
+
+    return matched_sets + matched_skills
 
 
 def resolve_set(name: str) -> SkillSet | None:
@@ -239,33 +306,42 @@ def add(
 
 
 def add_set(name: str) -> list[tuple[SkillSource, str]]:
-    """Install every skill in a named set, recording each one individually."""
+    """Install every skill in a named theme, recording each one individually."""
     sset = resolve_set(name)
     if sset is None:
         raise SkillError(f"'{name}' is not a skill set")
     with tempfile.TemporaryDirectory() as tmp:
         commit = _clone(sset.repo, sset.ref, tmp)
-        base = Path(tmp) / sset.path
-        if not base.is_dir():
-            raise SkillError(f"set path '{sset.path}' not found in {sset.repo}")
-        members = sorted(p.parent.name for p in base.glob("*/SKILL.md"))
-        if sset.include is not None:
-            members = [m for m in members if m in sset.include]
-        if sset.exclude:
-            members = [m for m in members if m not in sset.exclude]
+
+        if sset.members is not None:
+            members = [(m.name, m.path) for m in sset.members]
+        else:
+            base = Path(tmp) / sset.path
+            if not base.is_dir():
+                raise SkillError(f"set path '{sset.path}' not found in {sset.repo}")
+            names = sorted(p.parent.name for p in base.glob("*/SKILL.md"))
+            if sset.include is not None:
+                names = [n for n in names if n in sset.include]
+            if sset.exclude:
+                names = [n for n in names if n not in sset.exclude]
+            members = [
+                (n, n if sset.path in (".", "") else f"{sset.path}/{n}") for n in names
+            ]
         if not members:
-            raise SkillError(f"no skills found under '{sset.path}' in {sset.repo}")
+            raise SkillError(f"no skills found for set '{name}' in {sset.repo}")
 
         installed: list[tuple[SkillSource, str]] = []
-        for member in members:
-            dest = repo_root() / SKILLS_DIR / member
+        for member_name, member_path in members:
+            src = Path(tmp) / member_path
+            if not (src / "SKILL.md").is_file():
+                raise SkillError(f"no SKILL.md found at '{member_path}' in {sset.repo}")
+            dest = repo_root() / SKILLS_DIR / member_name
             if dest.exists():
                 shutil.rmtree(dest)
             dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(base / member, dest, ignore=shutil.ignore_patterns(".git"))
-            member_path = member if sset.path in (".", "") else f"{sset.path}/{member}"
+            shutil.copytree(src, dest, ignore=shutil.ignore_patterns(".git"))
             source = SkillSource(
-                name=member,
+                name=member_name,
                 repo=sset.repo,
                 path=member_path,
                 ref=sset.ref,

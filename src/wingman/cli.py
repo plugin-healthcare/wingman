@@ -2,7 +2,7 @@
 
 Installed per-repo. Every command operates on the current working directory.
 Commands:
-  init    write copilot-instructions.md + .vscode/mcp.json, then pick artifacts
+  init    write copilot-instructions.md + .mcp.json, then pick artifacts
   add     pick and install more catalog artifacts (skills/agents/prompts/instructions)
   skill   manage skills directly (add/list/update/remove)
   agent   manage bundled agents directly (list/add)
@@ -23,10 +23,11 @@ import typer
 from wingman import audit as audit_mod
 from wingman import catalog as catalog_mod
 from wingman import check as check_mod
+from wingman import docs as docs_mod
 from wingman import review as review_mod
 from wingman import skills as skills_mod
+from wingman import sync as sync_mod
 from wingman.core import (
-    available_stacks,
     data_path,
     repo_root,
     write_instructions,
@@ -45,7 +46,103 @@ AllOpt = Annotated[
     bool, typer.Option("--all", help="Select every catalog item (non-interactive).")
 ]
 
-MENU_KINDS = ["skills", "agents", "prompts", "instructions"]
+MENU_KINDS = ["skills", "agents", "prompts", "instructions", "mcp"]
+
+
+@app.command()
+def sync(
+    all_: Annotated[
+        bool,
+        typer.Option(
+            "--all", help="Scan all installed packages, not just direct deps."
+        ),
+    ] = False,
+    docs: Annotated[
+        bool,
+        typer.Option(
+            "--docs/--no-docs",
+            help=(
+                "For packages with no skill, probe PyPI for an llms.txt "
+                "and add found ones to the mcpdoc MCP server in .mcp.json."
+            ),
+        ),
+    ] = True,
+) -> None:
+    """Sync skills (and optionally docs) from installed packages.
+
+    Phase 1 — embedded skills: copies SKILL.md files bundled inside installed
+    packages (library-skills standard) into .github/skills/.
+
+    Phase 2 — indexed skills: for installed packages with a known official skill
+    repo in wingman's index (e.g. duckdb, streamlit), fetches and installs those
+    skills automatically.
+
+    Phase 3 — docs fallback (--docs, on by default): for packages still without
+    any skill, queries PyPI for a docs URL and probes for llms.txt. Found sources
+    are wired into the mcpdoc MCP server in .mcp.json.
+
+    By default only direct dependencies from pyproject.toml are considered.
+    """
+    direct = sync_mod.direct_deps(repo_root()) or set()
+
+    # Phase 1: embedded skills from installed packages.
+    result = sync_mod.sync(all_packages=all_)
+    for w in result.warnings:
+        typer.echo(f"warning: {w}", err=True)
+    for name in result.added:
+        typer.echo(f"  skill added    {name}")
+    for name in result.updated:
+        typer.echo(f"  skill updated  {name}")
+    for name in result.removed:
+        typer.echo(f"  skill removed  {name}")
+    for name in result.unchanged:
+        typer.echo(f"  skill ok       {name}")
+
+    covered = set(result.added + result.updated + result.unchanged)
+
+    # Phase 2: indexed skills for installed packages (separate skill repos).
+    packages_without_skill = direct - {
+        sync_mod.normalize_package_name(s) for s in covered
+    }
+    to_install = skills_mod.indexed_for_packages(packages_without_skill)
+    for target in to_install:
+        try:
+            if skills_mod.resolve_set(target) is not None:
+                installed = skills_mod.add_set(target)
+                for source, commit in installed:
+                    typer.echo(
+                        f"  skill added    {source.name} (indexed via {target})"
+                        f" @ {commit[:12]}"
+                    )
+                    covered.add(source.name)
+            else:
+                source, commit = skills_mod.add(target)
+                typer.echo(f"  skill added    {source.name} (indexed) @ {commit[:12]}")
+                covered.add(source.name)
+        except skills_mod.SkillError as exc:
+            typer.echo(f"  warning: could not install indexed skill '{target}': {exc}")
+
+    # Phase 3: llms.txt docs fallback.
+    if docs:
+        still_uncovered = [
+            pkg
+            for pkg in direct
+            if sync_mod.normalize_package_name(pkg)
+            not in {sync_mod.normalize_package_name(s) for s in covered}
+        ]
+        if still_uncovered:
+            typer.echo("  checking for llms.txt fallback docs…")
+            added_docs = docs_mod.sync_docs(still_uncovered)
+            if added_docs:
+                for label, url in added_docs.items():
+                    typer.echo(f"  docs added     {label}  →  {url}")
+            else:
+                typer.echo("  no llms.txt found for remaining packages")
+
+    if not any(
+        [result.added, result.updated, result.removed, result.unchanged, to_install]
+    ):
+        typer.echo("No library skills found.")
 
 
 # ── init ──────────────────────────────────────────────────────────────────────
@@ -166,6 +263,9 @@ def _select_and_install(kinds: list[str], select_all: bool) -> None:
             typer.echo(f"  failed {item.name}: {exc}", err=True)
 
 
+_SELECT_ALL = object()  # sentinel for the "select all" picker entry
+
+
 def _checkbox_select(cat: dict[str, list]) -> list:
     import questionary
 
@@ -174,16 +274,28 @@ def _checkbox_select(cat: dict[str, list]) -> list:
         if not items:
             continue
         choices = [
-            questionary.Choice(
-                title=f"{it.name}  —  {it.description[:70]}"
-                if it.description
-                else it.name,
-                value=it,
-            )
-            for it in items
+            questionary.Choice(title="── select all ──", value=_SELECT_ALL),
+            *(
+                questionary.Choice(
+                    title=f"{it.name}  —  {it.description[:70]}"
+                    if it.description
+                    else it.name,
+                    value=it,
+                    checked=it.checked,
+                )
+                for it in items
+            ),
         ]
-        picked = questionary.checkbox(f"Select {kind}:", choices=choices).ask()
-        if picked:
+        picked = questionary.checkbox(
+            f"Select {kind}:",
+            choices=choices,
+            instruction="(↑↓ move · space toggle · 'a' all · enter confirm)",
+        ).ask()
+        if not picked:
+            continue
+        if _SELECT_ALL in picked:
+            chosen += items
+        else:
             chosen += picked
     return chosen
 
@@ -239,31 +351,25 @@ def skill_list(
         ),
     ] = False,
 ) -> None:
-    """List installed skills, or with --all, every skill the index offers."""
+    """List installed skills, or with --all, the themes the index offers."""
     if all_:
-        available = {it.name: it for it in catalog_mod.catalog_skills()}
-        installed = {r["name"]: r for r in skills_mod.list_skills()}
-        names = sorted(set(available) | set(installed))
-        if not names:
+        installed = skills_mod.list_skills()
+        themes = skills_mod.read_sets_index()
+        if not installed and not themes:
             typer.echo(
-                "No skills available. The index is empty — add entries to "
-                "data/skills/index.toml, or `wingman skill add <git-url> --path …`."
+                "No skills available. The index is empty — add a [sets.<theme>] "
+                "to data/skills/index.toml, or `wingman skill add <git-url> --path …`."
             )
             return
-        for name in names:
-            on_disk = name in installed and installed[name]["installed"]
-            mark = "✓" if on_disk else "—"
-            if name in available:
-                desc = available[name].description
-            else:
-                desc = "(installed from a git URL; not in the index)"
-            typer.echo(f"  {mark} {name:22s} {desc[:60]}")
-
-        sets = skills_mod.read_sets_index()
-        if sets:
-            typer.echo("\nSets (install all members with `wingman skill add <set>`):")
-            for s in sorted(sets.values(), key=lambda s: s.name):
-                typer.echo(f"  {s.name:22s} {s.description[:60]}")
+        if installed:
+            typer.echo("Installed skills:")
+            for r in installed:
+                mark = "✓" if r["installed"] else "—"
+                typer.echo(f"  {mark} {r['name']:22s} {r['ref']:16s} {r['commit']}")
+            typer.echo("")
+        typer.echo("Themes (install all skills with `wingman skill add <theme>`):")
+        for s in sorted(themes.values(), key=lambda s: s.name):
+            typer.echo(f"  {s.name:22s} {s.description[:60]}")
         return
 
     rows = skills_mod.list_skills()
@@ -513,7 +619,3 @@ def _scaffold(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
     typer.echo(f"Created {path.relative_to(repo_root())}")
-
-
-# silence unused-import lint for available_stacks (used by help/discovery tooling)
-_ = available_stacks

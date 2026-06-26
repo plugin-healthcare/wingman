@@ -26,11 +26,11 @@ def test_write_instructions_and_mcp(repo):
     core.write_mcp("python", dry_run=False)
 
     ci = repo / core.COPILOT_INSTRUCTIONS
-    mcp = repo / core.VSCODE_MCP
+    mcp = repo / core.MCP_CONFIG
     assert ci.is_file()
     data = json.loads(mcp.read_text())
-    # VS Code schema uses the top-level "servers" key.
-    assert "servers" in data
+    # Root .mcp.json uses the top-level "mcpServers" key (Copilot CLI schema).
+    assert "mcpServers" in data
 
 
 def test_write_dry_run_writes_nothing(repo):
@@ -43,7 +43,7 @@ def test_local_mcp_override_merges(repo):
     local = repo / ".wingman"
     local.mkdir()
     (local / "mcp.local.json").write_text(
-        json.dumps({"servers": {"extra": {"command": "echo"}}})
+        json.dumps({"mcpServers": {"extra": {"command": "echo"}}})
     )
     servers = core.merged_servers(None)
     assert "extra" in servers

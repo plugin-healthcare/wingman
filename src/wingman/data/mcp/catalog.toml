@@ -1,0 +1,38 @@
+# Selectable MCP servers offered in the `wingman init` / `wingman add` picker.
+#
+# Each [servers.<name>] is one MCP server the user can opt into. Selecting it
+# merges its `config` into the repo's .mcp.json (existing servers are
+# kept). `default = true` pre-checks a server in the picker.
+#
+#   [servers.<name>]
+#   description = "<one line shown in the picker>"
+#   default     = true            # optional, pre-checked
+#   [servers.<name>.config]       # written verbatim into .mcp.json
+#   type = "http"                 # or command/args for stdio servers
+#   url  = "https://…"
+
+[servers.github]
+description = "GitHub API: issues, PRs, and code search (Copilot-hosted)."
+default = true
+[servers.github.config]
+type = "http"
+url = "https://api.githubcopilot.com/mcp/"
+
+[servers.git]
+description = "Local git: history, blame, and diff on the current repo."
+default = true
+[servers.git.config]
+command = "uvx"
+args = ["mcp-server-git"]
+
+[servers.polars]
+description = "Polars dataframe API help and documentation."
+[servers.polars.config]
+type = "http"
+url = "https://mcp.pola.rs/mcp"
+
+[servers.likec4]
+description = "Query your LikeC4 architecture model in natural language."
+[servers.likec4.config]
+command = "npx"
+args = ["-y", "@likec4/mcp"]
