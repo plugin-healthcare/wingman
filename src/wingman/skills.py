@@ -23,7 +23,10 @@ from pathlib import Path
 
 from wingman.core import data_path, repo_root
 
-SKILLS_DIR = Path(".github") / "skills"
+COPILOT_SKILLS_DIR = Path(".github") / "skills"
+OPENCODE_SKILLS_DIR = Path(".opencode") / "skills"
+# Back-compat alias so external code referencing SKILLS_DIR keeps working.
+SKILLS_DIR = COPILOT_SKILLS_DIR
 MANIFEST = Path(".wingman") / "skills.toml"
 LOCK = Path(".wingman") / "skills.lock"
 
@@ -220,6 +223,18 @@ def resolve_set(name: str) -> SkillSet | None:
 # ── Git fetch + unpack ────────────────────────────────────────────────────────
 
 
+def _target_dirs(agent: str) -> list[Path]:
+    """Return the list of skill directories to operate on for the given agent target.
+
+    ``agent`` is one of ``"all"`` (default), ``"copilot"``, or ``"opencode"``.
+    """
+    if agent == "copilot":
+        return [COPILOT_SKILLS_DIR]
+    if agent == "opencode":
+        return [OPENCODE_SKILLS_DIR]
+    return [COPILOT_SKILLS_DIR, OPENCODE_SKILLS_DIR]
+
+
 def _git(args: list[str], cwd: str | None = None) -> str:
     result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
     if result.returncode != 0:
@@ -258,6 +273,24 @@ def fetch_skill(source: SkillSource, dest: Path) -> str:
     return commit
 
 
+def fetch_skill_to_all(source: SkillSource, dests: list[Path]) -> str:
+    """Clone once, copy the skill subfolder to every path in ``dests``.
+
+    Returns the commit SHA.  All destinations receive identical content.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        commit = _clone(source.repo, source.ref, tmp)
+        src = Path(tmp) / source.path
+        if not (src / "SKILL.md").is_file():
+            raise SkillError(f"no SKILL.md found at '{source.path}' in {source.repo}")
+        for dest in dests:
+            if dest.exists():
+                shutil.rmtree(dest)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(src, dest, ignore=shutil.ignore_patterns(".git"))
+    return commit
+
+
 # ── Public operations ─────────────────────────────────────────────────────────
 
 
@@ -281,8 +314,14 @@ def add(
     path: str | None = None,
     ref: str | None = None,
     name: str | None = None,
+    agent: str = "all",
 ) -> tuple[SkillSource, str]:
-    """Add a skill by curated name or by git URL (with ``path``)."""
+    """Add a skill by curated name or by git URL (with ``path``).
+
+    ``agent`` controls which skill directories receive the skill: ``"all"``
+    (default), ``"copilot"`` (``.github/skills/``), or ``"opencode"``
+    (``.opencode/skills/``).
+    """
     if "://" in target or target.endswith(".git") or "@" in target:
         if not path:
             raise SkillError("--path is required when adding a skill by git URL")
@@ -299,17 +338,22 @@ def add(
         if ref:
             source.ref = ref
 
-    dest = repo_root() / SKILLS_DIR / source.name
-    commit = fetch_skill(source, dest)
+    root = repo_root()
+    dests = [root / d / source.name for d in _target_dirs(agent)]
+    commit = fetch_skill_to_all(source, dests)
     _record(source, commit)
     return source, commit
 
 
-def add_set(name: str) -> list[tuple[SkillSource, str]]:
-    """Install every skill in a named theme, recording each one individually."""
+def add_set(name: str, agent: str = "all") -> list[tuple[SkillSource, str]]:
+    """Install every skill in a named theme, recording each one individually.
+
+    ``agent`` controls which skill directories receive the skills (see :func:`add`).
+    """
     sset = resolve_set(name)
     if sset is None:
         raise SkillError(f"'{name}' is not a skill set")
+    root = repo_root()
     with tempfile.TemporaryDirectory() as tmp:
         commit = _clone(sset.repo, sset.ref, tmp)
 
@@ -335,11 +379,12 @@ def add_set(name: str) -> list[tuple[SkillSource, str]]:
             src = Path(tmp) / member_path
             if not (src / "SKILL.md").is_file():
                 raise SkillError(f"no SKILL.md found at '{member_path}' in {sset.repo}")
-            dest = repo_root() / SKILLS_DIR / member_name
-            if dest.exists():
-                shutil.rmtree(dest)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(src, dest, ignore=shutil.ignore_patterns(".git"))
+            dests = [root / d / member_name for d in _target_dirs(agent)]
+            for dest in dests:
+                if dest.exists():
+                    shutil.rmtree(dest)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(src, dest, ignore=shutil.ignore_patterns(".git"))
             source = SkillSource(
                 name=member_name,
                 repo=sset.repo,
@@ -357,7 +402,12 @@ def list_skills() -> list[dict]:
     rows: list[dict] = []
     for name in sorted(manifest):
         s = manifest[name]
-        installed = (repo_root() / SKILLS_DIR / name / "SKILL.md").is_file()
+        copilot_installed = (
+            repo_root() / COPILOT_SKILLS_DIR / name / "SKILL.md"
+        ).is_file()
+        opencode_installed = (
+            repo_root() / OPENCODE_SKILLS_DIR / name / "SKILL.md"
+        ).is_file()
         rows.append(
             {
                 "name": name,
@@ -365,40 +415,55 @@ def list_skills() -> list[dict]:
                 "path": s.path,
                 "ref": s.ref or "(default)",
                 "commit": lock.get(name, {}).get("commit", "")[:12],
-                "installed": installed,
+                "installed": copilot_installed,
+                "opencode_installed": opencode_installed,
             }
         )
     return rows
 
 
-def update(name: str | None = None) -> list[tuple[str, str, str]]:
-    """Re-fetch one or all skills. Returns (name, old_commit, new_commit) tuples."""
+def update(name: str | None = None, agent: str = "all") -> list[tuple[str, str, str]]:
+    """Re-fetch one or all skills. Returns (name, old_commit, new_commit) tuples.
+
+    ``agent`` controls which skill directories are updated (see :func:`add`).
+    """
     manifest = read_manifest()
     if not manifest:
         raise SkillError("no skills in manifest")
     targets = [name] if name else list(manifest)
     lock = read_lock()
+    root = repo_root()
     results: list[tuple[str, str, str]] = []
     for n in targets:
         source = manifest.get(n)
         if source is None:
             raise SkillError(f"'{n}' is not in the manifest")
         old = lock.get(n, {}).get("commit", "")
-        commit = fetch_skill(source, repo_root() / SKILLS_DIR / n)
+        dests = [root / d / n for d in _target_dirs(agent)]
+        commit = fetch_skill_to_all(source, dests)
         _record(source, commit)
         results.append((n, old[:12], commit[:12]))
     return results
 
 
-def remove(name: str) -> None:
+def remove(name: str, agent: str = "all") -> None:
+    """Remove a skill from disk and the manifest.
+
+    ``agent`` controls which skill directories are cleaned up (see :func:`add`).
+    When ``agent`` is ``"all"`` the manifest entry is also removed; for a single
+    target only the on-disk copy is deleted and the manifest is preserved.
+    """
     manifest = read_manifest()
     if name not in manifest:
         raise SkillError(f"'{name}' is not in the manifest")
-    dest = repo_root() / SKILLS_DIR / name
-    if dest.exists():
-        shutil.rmtree(dest)
-    del manifest[name]
-    write_manifest(manifest)
-    lock = read_lock()
-    lock.pop(name, None)
-    write_lock(lock)
+    root = repo_root()
+    for skill_dir in _target_dirs(agent):
+        dest = root / skill_dir / name
+        if dest.exists():
+            shutil.rmtree(dest)
+    if agent == "all":
+        del manifest[name]
+        write_manifest(manifest)
+        lock = read_lock()
+        lock.pop(name, None)
+        write_lock(lock)

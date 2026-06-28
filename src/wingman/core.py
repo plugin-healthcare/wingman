@@ -18,6 +18,10 @@ COPILOT_INSTRUCTIONS = Path(".github") / "copilot-instructions.md"
 # `mcpServers` schema key. Not VS Code's `.vscode/mcp.json`.
 MCP_CONFIG = Path(".mcp.json")
 
+# opencode outputs (relative to the repo being set up)
+OPENCODE_AGENTS_MD = Path("AGENTS.md")
+OPENCODE_CONFIG = Path("opencode.json")
+
 
 def data_path() -> Path:
     """On-disk path to bundled package data (``wingman/data``)."""
@@ -100,6 +104,37 @@ def write_instructions(stack: str | None, dry_run: bool) -> str:
 def write_mcp(stack: str | None, dry_run: bool) -> str:
     content = json.dumps({"mcpServers": merged_servers(stack)}, indent=2) + "\n"
     return _write(MCP_CONFIG, content, dry_run)
+
+
+# ── opencode writers ──────────────────────────────────────────────────────────
+
+
+def assemble_opencode_config(stack: str | None) -> dict:
+    """Build the opencode.json content dict.
+
+    Merges MCP servers (under ``mcp.servers``) and lists both instruction files
+    so opencode picks up the same context as GitHub Copilot.
+    """
+    servers = merged_servers(stack)
+    return {
+        "$schema": "https://opencode.ai/config.json",
+        "instructions": [
+            str(OPENCODE_AGENTS_MD),
+            str(COPILOT_INSTRUCTIONS),
+        ],
+        "mcp": {"servers": servers} if servers else {},
+    }
+
+
+def write_agents_md(stack: str | None, dry_run: bool) -> str:
+    """Write AGENTS.md with the same assembled content as copilot-instructions.md."""
+    return _write(OPENCODE_AGENTS_MD, assemble_instructions(stack), dry_run)
+
+
+def write_opencode_config(stack: str | None, dry_run: bool) -> str:
+    """Write opencode.json with MCP servers and instruction file references."""
+    content = json.dumps(assemble_opencode_config(stack), indent=2) + "\n"
+    return _write(OPENCODE_CONFIG, content, dry_run)
 
 
 def read_mcp_servers() -> dict:

@@ -28,9 +28,10 @@ def test_add_fetches_and_records(repo, skill_source):
     source, commit = skills.add(url, path="demo", ref=ref)
     assert source.name == "demo"
     assert commit
-    installed = repo / skills.SKILLS_DIR / "demo" / "SKILL.md"
+    installed = repo / skills.COPILOT_SKILLS_DIR / "demo" / "SKILL.md"
     assert installed.is_file()
-    assert (repo / skills.SKILLS_DIR / "demo" / "references" / "note.md").is_file()
+    ref_note = repo / skills.COPILOT_SKILLS_DIR / "demo" / "references" / "note.md"
+    assert ref_note.is_file()
     assert "demo" in skills.read_manifest()
     assert skills.read_lock()["demo"]["commit"] == commit
 
@@ -56,7 +57,7 @@ def test_remove_deletes_skill(repo, skill_source):
     skills.add(url, path="demo", ref=ref)
     skills.remove("demo")
     assert "demo" not in skills.read_manifest()
-    assert not (repo / skills.SKILLS_DIR / "demo").exists()
+    assert not (repo / skills.COPILOT_SKILLS_DIR / "demo").exists()
 
 
 def test_add_by_url_requires_path(repo):
@@ -78,7 +79,7 @@ def test_add_set_installs_all_members(repo, skill_set_source, monkeypatch):
     installed = skills.add_set("demo-set")
     assert sorted(s.name for s, _ in installed) == ["alpha", "beta", "gamma"]
     for m in ("alpha", "beta", "gamma"):
-        assert (repo / skills.SKILLS_DIR / m / "SKILL.md").is_file()
+        assert (repo / skills.COPILOT_SKILLS_DIR / m / "SKILL.md").is_file()
     manifest = skills.read_manifest()
     assert set(manifest) == {"alpha", "beta", "gamma"}
     # members are recorded individually so update/remove work per-skill
@@ -98,7 +99,7 @@ def test_add_set_respects_exclude(repo, skill_set_source, monkeypatch):
     )
     installed = skills.add_set("demo-set")
     assert sorted(s.name for s, _ in installed) == ["alpha", "beta"]
-    assert not (repo / skills.SKILLS_DIR / "gamma").exists()
+    assert not (repo / skills.COPILOT_SKILLS_DIR / "gamma").exists()
 
 
 def test_add_set_explicit_members(repo, skill_set_source, monkeypatch):
@@ -119,7 +120,7 @@ def test_add_set_explicit_members(repo, skill_set_source, monkeypatch):
     )
     installed = skills.add_set("demo-set")
     assert sorted(s.name for s, _ in installed) == ["alpha", "gamma"]
-    assert not (repo / skills.SKILLS_DIR / "beta").exists()
+    assert not (repo / skills.COPILOT_SKILLS_DIR / "beta").exists()
     manifest = skills.read_manifest()
     assert manifest["gamma"].path == "skills/gamma"
     # recorded path resolves for update/remove
