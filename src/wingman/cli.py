@@ -24,14 +24,17 @@ from wingman import audit as audit_mod
 from wingman import catalog as catalog_mod
 from wingman import check as check_mod
 from wingman import docs as docs_mod
+from wingman import opencode as opencode_mod
 from wingman import review as review_mod
 from wingman import skills as skills_mod
 from wingman import sync as sync_mod
 from wingman.core import (
     data_path,
     repo_root,
+    write_agents_md,
     write_instructions,
     write_mcp,
+    write_opencode_config,
 )
 
 app = typer.Typer(
@@ -154,10 +157,19 @@ def init(
     all_: AllOpt = False,
     dry_run: DryRun = False,
 ) -> None:
-    """Set up Copilot in this repo: write instructions + MCP, then pick artifacts."""
+    """Set up Copilot and opencode: write instructions + MCP, then pick artifacts."""
     typer.echo(f"Setting up Copilot for stack: {stack}")
     typer.echo(write_instructions(stack, dry_run))
     typer.echo(write_mcp(stack, dry_run))
+
+    typer.echo("\nSetting up opencode:")
+    typer.echo(write_agents_md(stack, dry_run))
+    typer.echo(write_opencode_config(stack, dry_run))
+    for line in opencode_mod.write_opencode_commands(dry_run):
+        typer.echo(line)
+    for line in opencode_mod.write_opencode_agents(dry_run):
+        typer.echo(line)
+
     if dry_run:
         typer.echo("\n[dry-run] skipping artifact selection")
         return
@@ -303,9 +315,17 @@ def _checkbox_select(cat: dict[str, list]) -> list:
 # ── skill ─────────────────────────────────────────────────────────────────────
 
 skill_app = typer.Typer(
-    help="Manage Copilot skills (.github/skills/).", no_args_is_help=True
+    help="Manage skills (.github/skills/ and .opencode/skills/).", no_args_is_help=True
 )
 app.add_typer(skill_app, name="skill")
+
+AgentOpt = Annotated[
+    str,
+    typer.Option(
+        "--agent",
+        help="Target skill directory: all (default), copilot, or opencode.",
+    ),
+]
 
 
 @skill_app.command("add")
@@ -319,12 +339,12 @@ def skill_add(
         str | None, typer.Option("--ref", help="Branch, tag, or commit SHA")
     ] = None,
     name: Annotated[str | None, typer.Option("--name", help="Local skill name")] = None,
+    agent: AgentOpt = "all",
 ) -> None:
-    """Fetch a skill or set from the index or a git URL into .github/skills/."""
-    # A bare name may refer to a set (a bundle of skills); install all of them.
+    """Fetch a skill or set from the index or a git URL."""
     if path is None and skills_mod.resolve_set(target) is not None:
         try:
-            installed = skills_mod.add_set(target)
+            installed = skills_mod.add_set(target, agent=agent)
         except skills_mod.SkillError as exc:
             typer.echo(f"error: {exc}", err=True)
             raise typer.Exit(1) from exc
@@ -334,7 +354,9 @@ def skill_add(
         return
 
     try:
-        source, commit = skills_mod.add(target, path=path, ref=ref, name=name)
+        source, commit = skills_mod.add(
+            target, path=path, ref=ref, name=name, agent=agent
+        )
     except skills_mod.SkillError as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(1) from exc
@@ -389,10 +411,11 @@ def skill_update(
     name: Annotated[
         str | None, typer.Argument(help="Skill to update (default: all)")
     ] = None,
+    agent: AgentOpt = "all",
 ) -> None:
     """Re-fetch one or all skills to their latest commit."""
     try:
-        results = skills_mod.update(name)
+        results = skills_mod.update(name, agent=agent)
     except skills_mod.SkillError as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(1) from exc
@@ -404,10 +427,11 @@ def skill_update(
 @skill_app.command("remove")
 def skill_remove(
     name: Annotated[str, typer.Argument(help="Skill to remove")],
+    agent: AgentOpt = "all",
 ) -> None:
     """Remove a skill from disk and the manifest."""
     try:
-        skills_mod.remove(name)
+        skills_mod.remove(name, agent=agent)
     except skills_mod.SkillError as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(1) from exc
@@ -619,3 +643,46 @@ def _scaffold(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
     typer.echo(f"Created {path.relative_to(repo_root())}")
+
+
+# ── opencode ──────────────────────────────────────────────────────────────────
+
+opencode_app = typer.Typer(
+    help="Manage opencode agents (.opencode/agents/).", no_args_is_help=True
+)
+app.add_typer(opencode_app, name="opencode")
+
+opencode_agent_app = typer.Typer(
+    help="Translate Copilot agents to opencode format.", no_args_is_help=True
+)
+opencode_app.add_typer(opencode_agent_app, name="agent")
+
+
+@opencode_agent_app.command("list")
+def opencode_agent_list() -> None:
+    """Show installed Copilot agents and their opencode translation status."""
+    root = repo_root()
+    src_dir = root / opencode_mod.COPILOT_AGENTS_DIR
+    if not src_dir.is_dir():
+        typer.echo("No agents installed under .github/agents/.")
+        return
+    agents = sorted(src_dir.glob("*.agent.md"))
+    if not agents:
+        typer.echo("No agents installed under .github/agents/.")
+        return
+    for src in agents:
+        name = src.stem.removesuffix(".agent")
+        dest = root / opencode_mod.OPENCODE_AGENTS_DIR / f"{name}.md"
+        mark = "✓" if dest.is_file() else "—"
+        typer.echo(f"  {mark} {name}")
+
+
+@opencode_agent_app.command("sync")
+def opencode_agent_sync(dry_run: DryRun = False) -> None:
+    """(Re)translate all .github/agents/*.agent.md to .opencode/agents/."""
+    lines = opencode_mod.write_opencode_agents(dry_run)
+    if not lines:
+        typer.echo("No Copilot agents found under .github/agents/ to translate.")
+        return
+    for line in lines:
+        typer.echo(line)

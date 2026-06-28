@@ -27,7 +27,7 @@ from typing import cast
 
 from wingman.audit import parse_frontmatter
 from wingman.core import repo_root
-from wingman.skills import SKILLS_DIR
+from wingman.skills import COPILOT_SKILLS_DIR, OPENCODE_SKILLS_DIR
 
 LIBRARY_SKILLS_LOCK = Path(".wingman") / "library-skills.json"
 
@@ -207,21 +207,25 @@ def write_lock(lock: dict[str, dict]) -> None:
 
 
 def _dest(skill_name: str) -> Path:
-    return repo_root() / SKILLS_DIR / skill_name
+    return repo_root() / COPILOT_SKILLS_DIR / skill_name
 
 
 def _install_skill(skill: LibrarySkill) -> None:
-    dest = _dest(skill.name)
-    if dest.exists():
-        shutil.rmtree(dest)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(skill.source_dir, dest)
+    root = repo_root()
+    for skill_dir in (COPILOT_SKILLS_DIR, OPENCODE_SKILLS_DIR):
+        dest = root / skill_dir / skill.name
+        if dest.exists():
+            shutil.rmtree(dest)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(skill.source_dir, dest)
 
 
 def _remove_skill(skill_name: str) -> None:
-    dest = _dest(skill_name)
-    if dest.exists():
-        shutil.rmtree(dest)
+    root = repo_root()
+    for skill_dir in (COPILOT_SKILLS_DIR, OPENCODE_SKILLS_DIR):
+        dest = root / skill_dir / skill_name
+        if dest.exists():
+            shutil.rmtree(dest)
 
 
 # ── Public sync entry point ───────────────────────────────────────────────────

@@ -8,7 +8,7 @@ Review the provided code and give structured feedback across these dimensions:
 
 **Correctness** — bugs, edge cases, error handling gaps  
 **Clarity** — naming, complexity, readability  
-**Conventions** — does it follow project patterns (see AGENTS.md)  
+**Conventions** — does it follow project patterns (see .github/copilot-instructions.md)  
 **Tests** — missing coverage for the changed behaviour  
 **Security** — any obvious OWASP Top 10 concerns  
 
